@@ -35,7 +35,7 @@ Este userscript Tampermonkey **bloqueia a resposta da API GraphQL da Netflix** q
 // ==UserScript==
 // @name         Netflix GraphQL Blocker
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Bloqueia resposta GraphQL que contenha "não faz parte da residência Netflix"
 // @author       Você
 // @match        https://www.netflix.com/*
@@ -43,45 +43,56 @@ Este userscript Tampermonkey **bloqueia a resposta da API GraphQL da Netflix** q
 // @run-at       document-start
 // ==/UserScript==
 
-(function() {
-  'use strict';
+(function () {
+  "use strict";
 
   const originalFetch = window.fetch;
 
-  window.fetch = function (...args) {
-    const [resource, config] = args;
-    let url = '';
+  function shouldBlockResponse(json) {
+    const jsonStr = JSON.stringify(json);
+    return jsonStr.includes("não faz parte da residência Netflix");
+  }
 
-    if (typeof resource === 'string') url = resource;
-    else if (resource && resource.url) url = resource.url;
+  window.fetch = async function (...args) {
+    const [resource] = args;
+    const url = typeof resource === "string" ? resource : resource?.url || "";
 
-    if (url.includes('graphql')) {
-      return originalFetch.apply(this, args).then(async (response) => {
-        const clone = response.clone();
-
-        const contentType = clone.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          let data;
-          try {
-            data = await clone.json();
-
-            const jsonStr = JSON.stringify(data);
-
-            if (jsonStr.includes('não faz parte da residência Netflix')) {
-              console.warn('Bloqueando resposta fetch por conter mensagem proibida.');
-              return Promise.reject(new Error('Resposta bloqueada pelo interceptor: mensagem proibida encontrada.'));
-            }
-          } catch (e) {
-            console.error('Erro ao ler JSON da resposta:', e);
-          }
-        }
-
-        return response;
-      });
+    if (!url.includes("graphql")) {
+      return originalFetch.apply(this, args);
     }
 
-    return originalFetch.apply(this, args);
+    try {
+      const response = await originalFetch.apply(this, args);
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        return response;
+      }
+
+      const clone = response.clone();
+      const data = await clone.json();
+
+      if (shouldBlockResponse(data)) {
+        console.warn(
+          "[fetch-interceptor] Bloqueando resposta com mensagem proibida:",
+          url
+        );
+        return Promise.reject(
+          new Error(
+            "Resposta bloqueada pelo interceptor: mensagem proibida encontrada."
+          )
+        );
+      }
+
+      return response;
+    } catch (err) {
+      console.error("[fetch-interceptor] Erro durante interceptação:", err);
+      throw err; // mantém o comportamento original em caso de erro inesperado
+    }
   };
 
-  console.log('Interceptor fetch graphql ativo para bloquear mensagens proibidas.');
+  console.log(
+    "[fetch-interceptor] Ativo para GraphQL com verificação de conteúdo."
+  );
 })();
+```
